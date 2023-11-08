@@ -1,0 +1,2 @@
+rpc.service.deric.test_IP = 127.0.1.1
+rpc.service.deric.test_Port = 13001
