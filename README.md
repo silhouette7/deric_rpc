@@ -73,8 +73,8 @@ Refer to example code in the dir ```./example```.
 2. Create an instance of class ```DericProcessEntry``` and initialize the process.
 3. Create an instance of class ```RpcClientEntry``` to hold a connection to the service, and connect it to the target service that defined in the service api files.
 
-## 3. Implementation
-### 3.1 Function register
+## 4. Implementation
+### 4.1 Function register
 All functions are config to an standard format defined in ```ServiceInterface::ServiceFunctionType``` by class ```FunctionHelper```, which receives the origin input string and return the result string.
 
 The ```FunctionHelper``` traits the typies of the arguments and return value of the register function by ```function_traits```. Then it deserializes the arguments from the input string, by ```RpcSerialer```, and feeds them to the register funtion to execute it.
