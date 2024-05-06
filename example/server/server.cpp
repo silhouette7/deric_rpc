@@ -20,9 +20,8 @@ public:
     }
 };
 
-int hello(const std::string& str) {
+void hello(const std::string& str) {
     std::cout << str << std::endl;
-    return 0;
 }
 
 int main() {
@@ -43,7 +42,7 @@ int main() {
 
     serviceEntry->start();
 
-    std::string endString = "exit";
+    const std::string endString = "exit";
     std::string inputString;
     while(1) {
         std::getline(std::cin, inputString);

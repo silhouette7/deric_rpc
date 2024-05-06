@@ -41,6 +41,22 @@ public:
     int stop();
 
 private:
+    typedef struct{
+        uint8_t magic;
+        uint32_t messageLen;
+
+        void deserialerFrom(const char* data, int len);
+        void serialerTo(char* buffer, int size);
+    } TcpHeader_s;
+
+    static const uint8_t TCP_HEADER_MAGIC = 0x01;
+
+    typedef enum{
+        TCP_HEADER_OFFSET_MAGIC = 0,
+        TCP_HEADER_OFFSET_MESSAGE_LEN = 1,
+        TCP_HEADER_SIZE = 5
+    } TcpHeaderOffset_e;
+
     typedef enum {
         TCP_IO_CONNECTION_MODE_SERVER = 0,
         TCP_IO_CONNECTION_MODE_CLIENT

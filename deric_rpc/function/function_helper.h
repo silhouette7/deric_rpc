@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <functional>
+#include <type_traits>
 
 #include "rpc_serialer.h"
 #include "function_traits.h"
@@ -26,8 +27,10 @@ public:
         return 0;
     }
 
+    // function with result
     template<typename F>
-    int evec(F func, const char* data, int len, std::string& resultString) {
+    typename std::enable_if<!std::is_void<typename function_traits<F>::Return_Type>::value, int>::type
+    exec(F func, const char* data, int len, std::string& resultString) {
         int res = 0;
 
         if (!m_serialer) {
@@ -35,7 +38,6 @@ public:
         }
 
         using tuple_args_type = typename function_traits<F>::Tuple_Args_Type;
-        using return_type = typename function_traits<F>::Return_Type;
 
         tuple_args_type args = m_serialer->getMessageData<tuple_args_type>(data, len);
         auto funcRes = callFunc(func, args, std::make_index_sequence<std::tuple_size<tuple_args_type>::value>{});
@@ -44,8 +46,29 @@ public:
         return res;
     }
 
+    // void function
+    template<typename F>
+    typename std::enable_if<std::is_void<typename function_traits<F>::Return_Type>::value, int>::type
+    exec(F func, const char* data, int len, std::string& resultString) {
+        int res = 0;
+
+        if (!m_serialer) {
+            return -1;
+        }
+
+        using tuple_args_type = typename function_traits<F>::Tuple_Args_Type;
+
+        tuple_args_type args = m_serialer->getMessageData<tuple_args_type>(data, len);
+        callFunc(func, args, std::make_index_sequence<std::tuple_size<tuple_args_type>::value>{});
+        resultString.clear();
+
+        return res;
+    }
+
+    // member funtion with result
     template<typename F, typename O>
-    int exec(F func, O* obj, const char* data, int len, std::string& resultString) {
+    typename std::enable_if<!std::is_void<typename function_traits<F>::Return_Type>::value, int>::type
+    exec(F func, O* obj, const char* data, int len, std::string& resultString) {
         int res = 0;
 
         if (!m_serialer) {
@@ -54,6 +77,22 @@ public:
 
         auto funcRes = callMemberFunc(func, obj, data, len);
         m_serialer->serialMessageData(funcRes, resultString);
+    
+        return res;
+    }
+
+    // void function
+    template<typename F, typename O>
+    typename std::enable_if<std::is_void<typename function_traits<F>::Return_Type>::value, int>::type
+    exec(F func, O* obj, const char* data, int len, std::string& resultString) {
+        int res = 0;
+
+        if (!m_serialer) {
+            return -1;
+        }
+
+        callMemberFunc(func, obj, data, len);
+        resultString.clear();
     
         return res;
     }

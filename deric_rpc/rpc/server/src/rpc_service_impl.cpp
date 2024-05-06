@@ -194,7 +194,7 @@ namespace rpc
         std::lock_guard<std::mutex> guard(m_functionsMutex);
 
         if (m_functions.find(funcName) == m_functions.end()) {
-            DEBUG_ERROR("func: %s not already", funcName.c_str());
+            DEBUG_ERROR("func: %s not add yet", funcName.c_str());
         }
         else {
             DEBUG_INFO("func: %s is removed", funcName.c_str());

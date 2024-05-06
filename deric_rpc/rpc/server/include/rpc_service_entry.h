@@ -37,12 +37,11 @@ public:
             res = -1;
         }
         else {
-            res = registerMethodImpl(funcName, std::bind(&FunctionHelper::evec<F>,
-                                                         m_funcHelper,
-                                                         func,
-                                                         std::placeholders::_1,
-                                                         std::placeholders::_2,
-                                                         std::placeholders::_3));
+            std::weak_ptr<FunctionHelper> wp = m_funcHelper;
+            res = registerMethodImpl(funcName, [wp, func](const char* data, int len, std::string& resultStr)->int
+                                                            { auto sp = wp.lock(); 
+                                                              if (sp) return sp->exec<F>(func, data, len, resultStr);
+                                                              return -1; });
         }
         return res;
     }
@@ -55,13 +54,11 @@ public:
             res = -1;
         }
         else {
-            res = registerMethodImpl(funcName, std::bind(&FunctionHelper::exec<F, O>,
-                                                         m_funcHelper,
-                                                         func,
-                                                         obj,
-                                                         std::placeholders::_1,
-                                                         std::placeholders::_2,
-                                                         std::placeholders::_3));
+            std::weak_ptr<FunctionHelper> wp = m_funcHelper;
+            res = registerMethodImpl(funcName, [wp, func, obj](const char* data, int len, std::string& resultStr)->int
+                                                                { auto sp = wp.lock(); 
+                                                                  if (sp) return sp->exec<F, O>(func, obj, data, len, resultStr);
+                                                                  return -1; });
         }
         return res;
     }

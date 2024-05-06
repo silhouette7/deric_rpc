@@ -121,7 +121,7 @@ namespace rpc
                 DEBUG_INFO("receive msgId: %d", msgId);
                 if (m_waitingItems.find(msgId) == m_waitingItems.end()) {
                     DEBUG_ERROR("not found msgId: %d", msgId);
-                    break;;
+                    break;
                 }
                 auto& item = m_waitingItems[msgId];
                 item.msg = msg;

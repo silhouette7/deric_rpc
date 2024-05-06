@@ -25,16 +25,16 @@ int main() {
         std::cout << res << std::endl;
     }
 
+    if (0 > clientEntry->invoke(RPC_SERVICE_DERIC_TEST_HELLO, "what's up")) {
+        std::cout << "call" << RPC_SERVICE_DERIC_TEST_HELLO << "failed" << std::endl;
+    }
+
     int a = 3, b = 1;
     if (0 > clientEntry->invokeWithResultSync<int>(RPC_SERVICE_DERIC_TEST_MINOR, res, a, b)) {
         std::cout << "call" << RPC_SERVICE_DERIC_TEST_MINOR << "failed" << std::endl;
     }
     else {
         std::cout << res << std::endl;
-    }
-
-    if (0 > clientEntry->invoke(RPC_SERVICE_DERIC_TEST_HELLO, "what's up")) {
-        std::cout << "call" << RPC_SERVICE_DERIC_TEST_HELLO << "failed" << std::endl;
     }
 
     clientEntry->disconnect();

@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 
 #include "deric_debug.h"
+#include "message_public.h"
 #include "tcp_io_connection.h"
 
 namespace deric
@@ -47,19 +48,43 @@ namespace rpc
             return -1;
         }
 
-        int recvBytes = recv(m_socketFd, m_recvBuffer, m_bufferSize, 0);
-        if (recvBytes < 0) {
-            DEBUG_ERROR("recv data fail, res: %d", recvBytes);
+        TcpHeader_s tcpHeader;
+        ssize_t recvBytes = recv(m_socketFd, m_recvBuffer, TCP_HEADER_SIZE, MSG_WAITALL);
+        if (recvBytes < 0)
+        {
+            DEBUG_ERROR("recv data fail, res: %ld", recvBytes);
         }
-        else if (recvBytes == 0) {
+        else if (recvBytes == 0)
+        {
             DEBUG_INFO("the connection is being closed");
             spClient->handleEvent(TCP_IO_CONNECTION_EVENT_CLOSE, &m_socketFd);
         }
-        else {
-            DEBUG_INFO("recv data size: %d", recvBytes);
-            (void)spClient->handleData(m_recvBuffer, recvBytes);
-        }
+        else
+        {
+            tcpHeader.deserialerFrom(m_recvBuffer, recvBytes);
+            DEBUG_INFO("will receive data size: %u", tcpHeader.messageLen);
 
+            if (tcpHeader.messageLen > m_bufferSize)
+            {
+                DEBUG_ERROR("tcp message length - %d excced the buffer size - %d", tcpHeader.messageLen, m_bufferSize);
+            }
+            else
+            {
+                recvBytes = recv(m_socketFd, m_recvBuffer, tcpHeader.messageLen, MSG_WAITALL);
+                if (recvBytes < 0) {
+                    DEBUG_ERROR("recv data fail, res: %ld", recvBytes);
+                }
+                else if (recvBytes == 0) {
+                    DEBUG_INFO("the connection is being closed");
+                    spClient->handleEvent(TCP_IO_CONNECTION_EVENT_CLOSE, &m_socketFd);
+                }
+                else {
+                    DEBUG_INFO("recv data size: %ld", recvBytes);
+                    (void)spClient->handleData(m_recvBuffer, recvBytes);
+                }
+            }
+        }
+    
         return recvBytes;
     }
 
@@ -85,8 +110,17 @@ namespace rpc
             return -1;
         }
 
+        char headerBuffer[TCP_HEADER_SIZE];
+        TcpHeader_s tcpHeader;
+        tcpHeader.messageLen = len;
+        tcpHeader.serialerTo(headerBuffer, TCP_HEADER_SIZE);
+        int res = send(m_socketFd, headerBuffer, TCP_HEADER_SIZE, 0);
+        if (0 > res) {
+            DEBUG_ERROR("unable to send tcp header to socket: %d", m_socketFd);
+        }
+
         DEBUG_INFO("try to send data of size: %d to socket: %d", len, m_socketFd);
-        int res =  send(m_socketFd, data, len, 0);
+        res = send(m_socketFd, data, len, 0);
         if (0 > res) {
             DEBUG_ERROR("unable to send data of size: %d to socket: %d", len, m_socketFd);
         }
@@ -211,6 +245,24 @@ namespace rpc
         m_state = COMPONENT_STATE_CREATED;
 
         return 0;
+    }
+
+    void TcpIoConnection::TcpHeader_s::deserialerFrom(const char* data, int len) {
+        if (!data || len < TCP_HEADER_SIZE) {
+            DEBUG_ERROR("invalid params");
+        }
+
+        magic = TCP_HEADER_MAGIC;
+        messageLen = GET_UINT32_FROM_CHARS((uint8_t*)(data) + TCP_HEADER_OFFSET_MESSAGE_LEN);
+    }
+
+    void TcpIoConnection::TcpHeader_s::serialerTo(char* buffer, int size) {
+        if (!buffer || size < TCP_HEADER_SIZE) {
+            DEBUG_ERROR("invalid params");
+        }
+
+        buffer[0] = TCP_HEADER_MAGIC;
+        SET_UINT32_TO_CHARS(messageLen, (uint8_t*)buffer + TCP_HEADER_OFFSET_MESSAGE_LEN);
     }
 }
 }

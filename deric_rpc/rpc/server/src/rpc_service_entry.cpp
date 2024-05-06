@@ -53,10 +53,12 @@ namespace rpc
             std::string ip, port;
             if (0 > config.getValue("IP", ip)) {
                 DEBUG_ERROR("no IP indicated in the config");
+                res = -1;
                 break;
             }
             if (0 > config.getValue("Port", port)) {
                 DEBUG_ERROR("no port indicated in the config");
+                res = -1;
                 break;
             }
             serviceConfig.serviceIp = std::move(ip);
