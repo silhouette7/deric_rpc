@@ -18,7 +18,6 @@ namespace rpc
         m_ip(),
         m_port(-1),
         m_maxConnectionNumber(0),
-        m_ioBufferSize(0),
         m_socketFd(-1),
         m_client(),
         m_ioEntry()
@@ -37,7 +36,6 @@ namespace rpc
             m_ip = config.ip;
             m_port = config.port;
             m_maxConnectionNumber = config.maxConnectionNumber;
-            m_ioBufferSize = config.ioBufferSize;
             m_client = config.serverClient;
             m_state = COMPONENT_STATE_INITIALIZED;
 
@@ -176,7 +174,7 @@ namespace rpc
                 break;
             }
 
-            std::shared_ptr<TcpIoConnection> spConnection = std::make_shared<TcpIoConnection>(m_ioBufferSize);
+            std::shared_ptr<TcpIoConnection> spConnection = std::make_shared<TcpIoConnection>();
             spConnection->setIoFd(acceptSocket);
             spConnection->setIoClient(spConnectionClient);
             spConnectionClient->setIoConnection(spConnection);

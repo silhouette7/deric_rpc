@@ -63,8 +63,6 @@ public:
         return res;
     }
 
-    static const int DEFAULT_RPC_SERVICE_BUFFER_SIZE = 2048;
-
 private:
     int registerMethodImpl(const std::string& funcName, const ServiceInterface::ServiceFunctionType& func);
 

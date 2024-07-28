@@ -12,10 +12,10 @@ namespace deric
 {
 namespace rpc
 {
-    TcpIoConnection::TcpIoConnection(int bufferSize) :
+    TcpIoConnection::TcpIoConnection() :
         m_state(COMPONENT_STATE_CREATED),
-        m_bufferSize(bufferSize),
-        m_recvBuffer(nullptr),
+        m_sendBuffer(),
+        m_receiveBuffer(),
         m_socketFd(-1),
         m_ioMode(TCP_IO_CONNECTION_MODE_SERVER),
         m_ioClient()
@@ -48,8 +48,9 @@ namespace rpc
             return -1;
         }
 
+        m_receiveBuffer.resize(TCP_HEADER_SIZE);
         TcpHeader_s tcpHeader;
-        ssize_t recvBytes = recv(m_socketFd, m_recvBuffer, TCP_HEADER_SIZE, MSG_WAITALL);
+        ssize_t recvBytes = recv(m_socketFd, m_receiveBuffer.data(), TCP_HEADER_SIZE, MSG_WAITALL);
         if (recvBytes < 0)
         {
             DEBUG_ERROR("recv data fail, res: %ld", recvBytes);
@@ -61,29 +62,23 @@ namespace rpc
         }
         else
         {
-            tcpHeader.deserialerFrom(m_recvBuffer, recvBytes);
+            tcpHeader.deserialerFrom(m_receiveBuffer.data(), recvBytes);
             DEBUG_INFO("will receive data size: %u", tcpHeader.messageLen);
-
-            if (tcpHeader.messageLen > m_bufferSize)
-            {
-                DEBUG_ERROR("tcp message length - %d excced the buffer size - %d", tcpHeader.messageLen, m_bufferSize);
+            m_receiveBuffer.resize(tcpHeader.messageLen);
+            recvBytes = recv(m_socketFd, m_receiveBuffer.data(), tcpHeader.messageLen, MSG_WAITALL);
+            if (recvBytes < 0) {
+                DEBUG_ERROR("recv data fail, res: %ld", recvBytes);
             }
-            else
-            {
-                recvBytes = recv(m_socketFd, m_recvBuffer, tcpHeader.messageLen, MSG_WAITALL);
-                if (recvBytes < 0) {
-                    DEBUG_ERROR("recv data fail, res: %ld", recvBytes);
-                }
-                else if (recvBytes == 0) {
-                    DEBUG_INFO("the connection is being closed");
-                    spClient->handleEvent(TCP_IO_CONNECTION_EVENT_CLOSE, &m_socketFd);
-                }
-                else {
-                    DEBUG_INFO("recv data size: %ld", recvBytes);
-                    (void)spClient->handleData(m_recvBuffer, recvBytes);
-                }
+            else if (recvBytes == 0) {
+                DEBUG_INFO("the connection is being closed");
+                spClient->handleEvent(TCP_IO_CONNECTION_EVENT_CLOSE, &m_socketFd);
+            }
+            else {
+                DEBUG_INFO("recv data size: %ld", recvBytes);
+                (void)spClient->handleData(m_receiveBuffer.data(), recvBytes);
             }
         }
+        m_receiveBuffer.clear();
     
         return recvBytes;
     }
@@ -110,20 +105,17 @@ namespace rpc
             return -1;
         }
 
-        char headerBuffer[TCP_HEADER_SIZE];
+        m_sendBuffer.resize(TCP_HEADER_SIZE + len);
         TcpHeader_s tcpHeader;
         tcpHeader.messageLen = len;
-        tcpHeader.serialerTo(headerBuffer, TCP_HEADER_SIZE);
-        int res = send(m_socketFd, headerBuffer, TCP_HEADER_SIZE, 0);
+        tcpHeader.serialerTo(m_sendBuffer.data(), TCP_HEADER_SIZE);
+        memcpy(m_sendBuffer.data() + TCP_HEADER_SIZE, data, len);
+        DEBUG_INFO("try to send data of size: %d to socket: %d", len, m_socketFd);
+        int res = send(m_socketFd, m_sendBuffer.data(), TCP_HEADER_SIZE + len, 0);
         if (0 > res) {
-            DEBUG_ERROR("unable to send tcp header to socket: %d", m_socketFd);
+            DEBUG_ERROR("unable to send data to socket: %d", m_socketFd);
         }
 
-        DEBUG_INFO("try to send data of size: %d to socket: %d", len, m_socketFd);
-        res = send(m_socketFd, data, len, 0);
-        if (0 > res) {
-            DEBUG_ERROR("unable to send data of size: %d to socket: %d", len, m_socketFd);
-        }
         DEBUG_INFO("send data of size: %d to socket: %d successfully", len, m_socketFd);
 
         return res;
@@ -176,7 +168,6 @@ namespace rpc
             return -1;
         }
 
-        m_recvBuffer = new char[m_bufferSize];
         m_state = COMPONENT_STATE_STARTED;
         return 0;
     }
@@ -215,7 +206,6 @@ namespace rpc
             return -1;
         }
 
-        m_recvBuffer = new char[m_bufferSize];
         m_ioMode = TCP_IO_CONNECTION_MODE_CLIENT;
         m_state = COMPONENT_STATE_STARTED;
 
@@ -227,11 +217,6 @@ namespace rpc
         if (m_state != COMPONENT_STATE_STARTED) {
             DEBUG_ERROR("invalid state");
             return -1;
-        }
-
-        if (m_recvBuffer) {
-            delete[] m_recvBuffer;
-            m_recvBuffer = nullptr;
         }
 
         if (m_socketFd) {

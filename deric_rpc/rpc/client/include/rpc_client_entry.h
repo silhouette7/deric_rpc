@@ -75,7 +75,7 @@ public:
 
         return 0;
     }
-
+ 
     template<typename... Args, typename O>
     int invokeWithResultAsync(const std::string& func, Args&&... args, O& observer) {
         // Not implement
@@ -105,7 +105,6 @@ private:
     std::unique_ptr<RpcSerialer> m_serialer;
     std::shared_ptr<ClientInterface> m_clientImpl;
     std::string m_serviceBook;
-    int m_bufferSize;
     std::mutex m_waitingLock;
     std::map<int, ClientWaitingItem> m_waitingItems;
 };

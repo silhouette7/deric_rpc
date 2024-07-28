@@ -16,7 +16,6 @@ typedef struct {
     std::string ip;
     int port;
     int maxConnectionNumber;
-    int ioBufferSize;
     std::shared_ptr<IoServerClientInterface> serverClient;
 } TcpIoServerConfig_s;
 
@@ -45,7 +44,6 @@ public:
     std::string m_ip;
     int m_port;
     int m_maxConnectionNumber;
-    int m_ioBufferSize;
     int m_socketFd;
     std::shared_ptr<IoServerClientInterface> m_client;
     std::shared_ptr<IoMember> m_ioEntry;

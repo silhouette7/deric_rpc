@@ -13,7 +13,6 @@ typedef struct {
     std::string serviceIp;
     int servicePort;
     int maxConnectionNumber;
-    int ioBufferSize;
     std::shared_ptr<RpcSerialer> serialer;
 } ServiceConfig_s;
 

@@ -12,7 +12,6 @@ namespace rpc
 typedef struct {
     std::string serviceIp;
     std::string servicePort;
-    int ioBufferSize;
 } ClientConnectionConfig_s;
 
 class ClientInterface

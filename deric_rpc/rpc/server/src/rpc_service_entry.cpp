@@ -31,15 +31,6 @@ namespace rpc
                 res = -1;
                 break;
             }
-
-            std::string s_bufferSize;
-            int bufferSize = DEFAULT_RPC_SERVICE_BUFFER_SIZE;
-            if (0 > config.getValue("BufferSize", s_bufferSize)) {
-                DEBUG_INFO("no buffer size inficated in the config, using the default value");
-            }
-            else {
-                bufferSize = std::stoi(s_bufferSize);
-            }
             
             std::shared_ptr<RpcSerialer> serialer = std::make_shared<RpcSerialer>();
 
@@ -63,7 +54,6 @@ namespace rpc
             }
             serviceConfig.serviceIp = std::move(ip);
             serviceConfig.servicePort = std::stoi(port);
-            serviceConfig.ioBufferSize = bufferSize;
             serviceConfig.serialer = serialer;
             res = m_serviceImpl->init(serviceConfig);
             if (0 > res) {

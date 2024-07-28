@@ -50,7 +50,6 @@ namespace rpc
             config.ip = serviceConfig.serviceIp;
             config.port = serviceConfig.servicePort;
             config.maxConnectionNumber = serviceConfig.maxConnectionNumber;
-            config.ioBufferSize = serviceConfig.ioBufferSize;
             config.serverClient = shared_from_this();
             res = m_ioServer->init(config);
             if(res < 0) {

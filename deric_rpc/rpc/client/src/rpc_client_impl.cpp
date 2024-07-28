@@ -7,7 +7,7 @@ namespace deric
 namespace rpc
 {
     int RpcClientImpl::connect(const ClientConnectionConfig_s& _config) {
-        std::shared_ptr<TcpIoConnection> io = std::make_shared<TcpIoConnection>(_config.ioBufferSize);
+        std::shared_ptr<TcpIoConnection> io = std::make_shared<TcpIoConnection>();
 
         io->setIoClient(shared_from_this());
 
@@ -19,6 +19,7 @@ namespace rpc
 
         if (0 > IoModule::getInstance().addIoMember(io)) {
             DEBUG_ERROR("unable to add io member");
+            io->stop();
             io.reset();
             return -1;
         }

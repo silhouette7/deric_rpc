@@ -14,15 +14,6 @@ namespace rpc
             return -1;
         }
 
-        std::string s_bufferSize;
-        if (0 > config.getValue("BufferSize", s_bufferSize)) {
-            DEBUG_ERROR("unable to get buffersize, using the default value");
-            m_bufferSize = DEFAULT_RPC_CLIENT_BUFFER_SIZE;
-        }
-        else {
-            m_bufferSize = std::stoi(s_bufferSize);
-        }
-
         m_clientImpl = std::make_shared<RpcClientImpl>();
         std::weak_ptr<RpcClientEntry> wp = shared_from_this();
         auto callback = [wp](const std::string& str)->void{auto sp = wp.lock();
@@ -80,7 +71,6 @@ namespace rpc
         DEBUG_INFO("connecting to serivce - %s, with ip - %s port - %s", serviceName.c_str(), serviceIp.c_str(), servicePort.c_str());
 
         ClientConnectionConfig_s config;
-        config.ioBufferSize = m_bufferSize;
         config.serviceIp = std::move(serviceIp);
         config.servicePort = std::move(servicePort);
 

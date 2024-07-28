@@ -1,11 +1,12 @@
 #ifndef _TCP_IO_CONNECTION_H_
 #define _TCP_IO_CONNECTION_H_
 
-#include <memory>
-
 #include "io_connection_client_interface.h"
 #include "io_interface.h"
 #include "component_public.h"
+
+#include <memory>
+#include <vector>
 
 namespace deric
 {
@@ -14,7 +15,7 @@ namespace rpc
 class TcpIoConnection : public IoMember
 {
 public:
-    TcpIoConnection(int bufferSize);
+    TcpIoConnection();
 
     ~TcpIoConnection();
 
@@ -63,8 +64,8 @@ private:
     } TcpIoConnectionMode_e;
 
     ComponentState_e m_state;
-    int m_bufferSize;
-    char *m_recvBuffer;
+    std::vector<char> m_sendBuffer;
+    std::vector<char> m_receiveBuffer;
     int m_socketFd;
     TcpIoConnectionMode_e m_ioMode;
     std::weak_ptr<IoConnectionClientInterface> m_ioClient;
