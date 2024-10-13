@@ -1,56 +1,70 @@
-#include "deric_debug.h"
 #include "tcp_io_server_entry.h"
+
+#include "deric_debug.h"
+
+#include <sys/socket.h>
+#include <unistd.h>
 
 namespace deric
 {
-namespace rpc
-{
-    TcpIoServerEntry::TcpIoServerEntry(int socketFd, std::shared_ptr<TcpIoServer> serverImpl) :
+    TcpIoServerEntry::TcpIoServerEntry(int socketFd) :
         m_socketFd(socketFd),
-        m_serverImpl(serverImpl)
+        m_connectCallback(),
+        m_errorCallback()
     {
         DEBUG_INFO("construct");
     }
 
     TcpIoServerEntry::~TcpIoServerEntry() {
         DEBUG_INFO("deconstruct");
+        if (m_socketFd) {
+            close(m_socketFd);
+        }
     }
 
     int TcpIoServerEntry::getFd() {
         return m_socketFd;
     }
 
-    int TcpIoServerEntry::onReadAvailable() {
-        if (m_serverImpl) {
-            return m_serverImpl->onConnectRequest();
-        }
-        else {
-            DEBUG_ERROR("no server instance");
-            return -1;
+    void TcpIoServerEntry::onReadAvailable() {
+        if (m_connectCallback) {
+            int acceptSocket = accept(m_socketFd, NULL, NULL);
+            m_connectCallback(acceptSocket);
         }
     }
 
-    int TcpIoServerEntry::onWriteAvailable() {
+    void TcpIoServerEntry::onWriteAvailable() {
         //Not implement
-        return 0;
     }
 
-    int TcpIoServerEntry::onControlAvailable() {
+    void TcpIoServerEntry::onControlAvailable() {
         //Not implement
-        return 0;
     }
 
-    int TcpIoServerEntry::sendData(const char* data, int len) {
-        //Not implement
-        return 0;
-    }
-
-    IoMemberErrorAction TcpIoServerEntry::onIoError(IoMemberError_e error) {
-        DEBUG_ERROR("encounter io error: %d", error);
-        if (m_serverImpl) {
-            m_serverImpl->onIoError();
+    void TcpIoServerEntry::onIoError(IoMemberError_e error) {
+        if (m_errorCallback) {
+            m_errorCallback(error);
         }
-        return IO_MEMBER_ERROR_ACTION_NULL;
     }
-}
+
+    int TcpIoServerEntry::sendData(std::string_view) {
+        //Not implement
+        return -1;
+    }
+
+    void TcpIoServerEntry::setConnectCallback(const TcpIoServerEntryConnectCallbackType& callback) {
+        m_connectCallback = callback;
+    }
+
+    void TcpIoServerEntry::setConnectCallback(TcpIoServerEntryConnectCallbackType&& callback) {
+        m_connectCallback = std::move(callback);
+    }
+
+    void TcpIoServerEntry::setErrorCallback(const TcpIoServerEntryErrorCallbackType& callback) {
+        m_errorCallback = callback;
+    }
+
+    void TcpIoServerEntry::setErrorCallback(TcpIoServerEntryErrorCallbackType&& callback) {
+        m_errorCallback = std::move(callback);
+    }
 }

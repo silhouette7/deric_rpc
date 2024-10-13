@@ -1,21 +1,20 @@
 #ifndef _RPC_SERVICE_ENTRY_H
 #define _RPC_SERVICE_ENTRY_H
 
-#include <string>
-#include <memory>
-
-#include "function_helper.h"
 #include "config_interface.h"
+#include "rpc_function_executor.h"
 #include "service_interface.h"
 
-namespace deric
-{
-namespace rpc
+#include <memory>
+#include <optional>
+#include <string_view>
+
+namespace deric::rpc
 {
 class RpcServiceEntry
 {
 public:
-    RpcServiceEntry(const std::string& serviceName);
+    RpcServiceEntry(std::string_view serviceName);
 
     ~RpcServiceEntry();
 
@@ -27,50 +26,34 @@ public:
 
     int stop();
 
+    int registerEvent(const std::string& eventName);
+
+    int unregisterEvent(const std::string& eventName);
+
+    int postEvent(const std::string& eventName);
+
     int unregisterMethod(const std::string& funcName);
 
     template<typename F>
-    int registerMethod(const std::string& funcName, F func) {
-        int res = 0;
-        if (!m_funcHelper) {
-            DEBUG_ERROR("no valid function helper");
-            res = -1;
-        }
-        else {
-            std::weak_ptr<FunctionHelper> wp = m_funcHelper;
-            res = registerMethodImpl(funcName, [wp, func](const char* data, int len, std::string& resultStr)->int
-                                                            { auto sp = wp.lock(); 
-                                                              if (sp) return sp->exec<F>(func, data, len, resultStr);
-                                                              return -1; });
-        }
-        return res;
+    int registerMethod(const std::string& funcName, F&& func) {
+        return registerMethodImpl(funcName, [func = std::forward<F>(func)](std::string_view data)mutable->std::optional<std::string>
+                                            {return functionexecutor::exec(std::forward<decltype(func)>(func), data);}
+                                 );
     }
 
     template<typename F, typename O>
     int registerMethod(const std::string& funcName, F func, O* obj) {
-        int res = 0;
-        if (!m_funcHelper) {
-            DEBUG_ERROR("no valid function helper");
-            res = -1;
-        }
-        else {
-            std::weak_ptr<FunctionHelper> wp = m_funcHelper;
-            res = registerMethodImpl(funcName, [wp, func, obj](const char* data, int len, std::string& resultStr)->int
-                                                                { auto sp = wp.lock(); 
-                                                                  if (sp) return sp->exec<F, O>(func, obj, data, len, resultStr);
-                                                                  return -1; });
-        }
-        return res;
+        return registerMethodImpl(funcName, [func, obj](std::string_view data)mutable->std::optional<std::string>
+                                            {return functionexecutor::exec(func, obj, data);}
+                                 );
     }
 
 private:
-    int registerMethodImpl(const std::string& funcName, const ServiceInterface::ServiceFunctionType& func);
+    int registerMethodImpl(const std::string& funcName, ServiceInterface::ServiceFunctionType&& func);
 
     std::string m_serviceName;
-    std::shared_ptr<ServiceInterface> m_serviceImpl;
-    std::shared_ptr<FunctionHelper> m_funcHelper;
+    std::unique_ptr<ServiceInterface> m_serviceImpl;
 };
-}
 }
 
 #endif

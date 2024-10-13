@@ -1,24 +1,23 @@
-#include "deric_debug.h"
-#include "message_public.h"
-#include "io_module.h"
-#include "rpc_service_client_entry.h"
 #include "rpc_service_impl.h"
 
-namespace deric
+#include "deric_debug.h"
+#include "thread_pool.h"
+
+namespace deric::rpc
 {
-namespace rpc
-{
-    RpcServiceImpl::RpcServiceImpl(const std::string& serviceName) :
+    RpcServiceImpl::RpcServiceImpl(std::string_view serviceName, std::string_view ip, int port, int maxConnectionNumber) :
         m_serviceName(serviceName),
-        m_state(COMPONENT_STATE_CREATED),
-        m_serialer(),
-        m_ioServer(),
+        m_ioServer(std::make_unique<TcpIoServer>(ip, port, maxConnectionNumber)),
         m_clients(),
         m_functions(),
-        m_instanceMutex(),
+        m_events(),
         m_clientsMutex(),
-        m_functionsMutex()
+        m_functionsMutex(),
+        m_eventMutex()
     {
+        m_ioServer->setNewConnectCallback([this](const std::shared_ptr<TcpIoConnection>& connect){handleNewConnect(connect);});
+        m_ioServer->setEventCallback([this](const TcpIoServer::TcpIoServerEvent& event){handleIoServerEvent(event);});
+
         DEBUG_INFO("construct");
     }
 
@@ -26,301 +25,225 @@ namespace rpc
         DEBUG_INFO("deconstruct");
     }
 
-    int RpcServiceImpl::init(const ServiceConfig_s &serviceConfig) {
-        int res = -1;
-        std::lock_guard<std::mutex> guard(m_instanceMutex);
-
-        do {
-            if (m_state != COMPONENT_STATE_CREATED) {
-                DEBUG_ERROR("invalid state: %d", m_state);
-                res = -1;
-                break;
-            }
-
-            m_serialer = serviceConfig.serialer;
-
-            m_ioServer = std::make_shared<TcpIoServer>();
-            if (!m_ioServer) {
-                DEBUG_ERROR("create tcp io server fail");
-                res = -1;
-                break;
-            }
-
-            TcpIoServerConfig_s config;
-            config.ip = serviceConfig.serviceIp;
-            config.port = serviceConfig.servicePort;
-            config.maxConnectionNumber = serviceConfig.maxConnectionNumber;
-            config.serverClient = shared_from_this();
-            res = m_ioServer->init(config);
-            if(res < 0) {
-                DEBUG_ERROR("init tcp io server fail");
-                m_ioServer = nullptr;
-                res = -1;
-                break;
-            }
-        } while(0);
-
-        if (res >= 0) {
-            m_state = COMPONENT_STATE_INITIALIZED;
-        }
-
-        return res;
-    }
-
-    int RpcServiceImpl::deInit() {
-        int res = -1;
-        std::lock_guard<std::mutex> guard(m_instanceMutex);
-
-        do {
-            if (m_state != COMPONENT_STATE_INITIALIZED) {
-                DEBUG_ERROR("invalid state: %d", m_state);
-                res = -1;
-                break;
-            }
-
-            if (m_ioServer) {
-                res = m_ioServer->deInit();
-                if(res < 0) {
-                    DEBUG_ERROR("deinit tcp io server fail");
-                    res = -1;
-                    break;
-                }
-                m_ioServer.reset();
-            }
-
-            if (m_serialer) {
-                m_serialer.reset();
-            }
-        } while(0);
-
-        if (res >= 0) {
-            m_state = COMPONENT_STATE_CREATED;
-        }
-
-        return res;
-    }
-
     int RpcServiceImpl::start() {
-        int res = -1;
-        std::lock_guard<std::mutex> guard(m_instanceMutex);
-
-        do {
-            if (m_state != COMPONENT_STATE_INITIALIZED) {
-                DEBUG_INFO("invalid state: %d", m_state);
-                res = -1;
-                break;
-            }
-
-            if (!m_ioServer) {
-                DEBUG_ERROR("no tcp io server");
-                res = -1;
-                break;
-            }
-
-            res = m_ioServer->start();
-            if (0 > res) {
+        if (m_ioServer) {
+            if (0 > m_ioServer->start()) {
                 DEBUG_ERROR("start io server fail");
-                break;
+                return -1;
             }
-        } while(0);
-
-        if (res >= 0) {
-            m_state = COMPONENT_STATE_STARTED;
         }
 
-        return res;
+        return 0;
     }
 
     int RpcServiceImpl::stop() {
-        int res = -1;
-        std::lock_guard<std::mutex> guard(m_instanceMutex);
-
-        do {
-            if (m_state != COMPONENT_STATE_STARTED) {
-                DEBUG_INFO("invalid state: %d", m_state);
-                res = -1;
-                break;
-            }
-
-            if (!m_ioServer) {
-                DEBUG_ERROR("no io server");
-                res = 0;
-                break;
-            }
-
-            {
-                std::lock_guard<std::mutex> g(m_clientsMutex);
-                for (auto& client : m_clients) {
-                    if (0 > client.second->stopClientEntry()) {
-                        DEBUG_ERROR("enable to stop client: %u", client.first);
-                    }
+        {
+            std::lock_guard<std::mutex> g(m_clientsMutex);
+            for (auto& client : m_clients) {
+                if (0 > client.second->stop()) {
+                    DEBUG_ERROR("enable to stop client: %u", client.first);
                 }
-                m_clients.clear();
             }
+            m_clients.clear();
+        }
 
-            res = m_ioServer->stop();
-            if (0 > res) {
+        if (m_ioServer) {
+            if (0 > m_ioServer->stop()) {
                 DEBUG_ERROR("stop io server fail");
-                break;
             }
-        } while(0);
+        }
 
-        m_state = COMPONENT_STATE_INITIALIZED;
-
-        return res;
+        return 0;
     }
 
-    int RpcServiceImpl::registerMethod(const std::string& funcName,
-                                       const ServiceInterface::ServiceFunctionType& func)
-    {
-        int res = -1;
-        std::lock_guard<std::mutex> guard(m_functionsMutex);
+    int RpcServiceImpl::registerMethod(const std::string& funcName, const ServiceInterface::ServiceFunctionType& func) {
+        std::lock_guard<std::mutex> g(m_functionsMutex);
 
         if (m_functions.find(funcName) != m_functions.end()) {
             DEBUG_ERROR("func: %s exit already", funcName.c_str());
-        }
-        else {
-            DEBUG_INFO("func: %s is registered", funcName.c_str());
-            m_functions[funcName] = func;
-            res = 0;
+            return -1;
         }
 
-        return res;
+        DEBUG_INFO("func: %s is registered", funcName.c_str());
+        m_functions[funcName] = func;
+
+        return 0;
+    }
+
+    int RpcServiceImpl::registerMethod(const std::string& funcName, ServiceInterface::ServiceFunctionType&& func) {
+        std::lock_guard<std::mutex> g(m_functionsMutex);
+
+        if (m_functions.find(funcName) != m_functions.end()) {
+            DEBUG_ERROR("func: %s exit already", funcName.c_str());
+            return -1;
+        }
+
+        DEBUG_INFO("func: %s is registered", funcName.c_str());
+        m_functions[funcName] = std::forward<ServiceInterface::ServiceFunctionType>(func);
+
+        return 0;
     }
 
     int RpcServiceImpl::unregisterMethod(const std::string& funcName) {
-        int res = -1;
-        std::lock_guard<std::mutex> guard(m_functionsMutex);
+        std::lock_guard<std::mutex> g(m_functionsMutex);
 
         if (m_functions.find(funcName) == m_functions.end()) {
             DEBUG_ERROR("func: %s not add yet", funcName.c_str());
+            return -1;
         }
-        else {
-            DEBUG_INFO("func: %s is removed", funcName.c_str());
-            m_functions.erase(funcName);
-            res = 0;
-        }
-        return res;
-    }
 
-    int RpcServiceImpl::postEvent(const std::string& eventName, const char* pData, int len) {
-        // Not implementation
+        DEBUG_INFO("func: %s is removed", funcName.c_str());
+        m_functions.erase(funcName);
         return 0;
     }
 
-    void RpcServiceImpl::createIoConnectionClient(std::shared_ptr<IoConnectionClientInterface>& connectionClient) {
-        std::lock_guard<std::mutex> g(m_clientsMutex);
-        uint32_t clientId = getNewClientId();
-        auto spClient = std::make_shared<RpcServiceClientEntry>(clientId, shared_from_this());
-        m_clients[clientId] = spClient;
-        connectionClient = spClient;
-        DEBUG_INFO("add client of id: %u", clientId);
+    int RpcServiceImpl::registerEvent(const std::string& eventName) {
+        std::lock_guard<std::mutex> g(m_eventMutex);
+
+        if (m_events.find(eventName) != m_events.end()) {
+            DEBUG_ERROR("event: %s exit already", eventName.c_str());
+            return -1;
+        }
+
+        DEBUG_INFO("event: %s is registered", eventName.c_str());
+        m_events[eventName] = {};
+        return 0;
     }
 
-    void RpcServiceImpl::removeIoConnectionClient(std::shared_ptr<IoConnectionClientInterface> connectionClient) {
-        std::shared_ptr<RpcServiceClientEntry> spClient = std::dynamic_pointer_cast<RpcServiceClientEntry>(connectionClient);
-        if (!spClient) {
-            DEBUG_ERROR("invalid param");
+    int RpcServiceImpl::unregisterEvent(const std::string& eventName) {
+        std::lock_guard<std::mutex> g(m_eventMutex);
+
+        if (m_events.find(eventName) == m_events.end()) {
+            DEBUG_ERROR("event: %s not add yet", eventName.c_str());
+            return -1;
+        }
+
+        DEBUG_INFO("event: %s is removed", eventName.c_str());
+        m_events.erase(eventName);
+        return 0;
+    }
+
+    int RpcServiceImpl::postEvent(const std::string& eventName) {
+        std::vector<uint32_t> clients;
+        {
+            std::lock_guard<std::mutex> gEvents(m_eventMutex);
+            if (m_events.find(eventName) == m_events.end()) {
+                DEBUG_ERROR("unknown event: %s", eventName.c_str());
+                return -1;
+            }
+
+            clients = m_events[eventName];
+        }
+
+        serialer::MessageMeta meta = {MessageType::NOTIFY, eventName, getNewMessageId(), true};
+        std::string metaStr = serialer::serialMessageData(meta);
+        std::string eventStr = serialer::generateRpcStr(metaStr, "");
+        std::lock_guard<std::mutex> gClients(m_clientsMutex);
+        for (uint32_t client : clients) {
+            auto iter = m_clients.find(client);
+            if (iter != m_clients.end()) {
+                iter->second->sendData(eventStr);
+            }
+        }
+
+        return 0;
+    }
+
+    int RpcServiceImpl::clientRegisterToEvent(const std::string& eventName, uint32_t clientId) {
+        std::lock_guard<std::mutex> g(m_eventMutex);
+
+        if (m_events.find(eventName) == m_events.end()) {
+            DEBUG_ERROR("event: %s not add yet", eventName.c_str());
+            return -1;
+        }
+
+        DEBUG_INFO("client: %u register to event: %s", clientId, eventName.c_str());
+        m_events[eventName].push_back(clientId);
+        return 0;
+    }
+
+    int RpcServiceImpl::clientUnregisterToEvent(const std::string& eventName, uint32_t clientId) {
+        std::lock_guard<std::mutex> g(m_eventMutex);
+
+        if (m_events.find(eventName) == m_events.end()) {
+            DEBUG_ERROR("event: %s not add yet", eventName.c_str());
+            return -1;
+        }
+
+        DEBUG_INFO("client: %u unregister to event: %s", clientId, eventName.c_str());
+        auto& regitserClients = m_events[eventName];
+        regitserClients.erase(std::remove(regitserClients.begin(), regitserClients.end(), clientId));
+        return 0;
+    }
+
+    void RpcServiceImpl::handleNewConnect(const std::shared_ptr<TcpIoConnection>& connect) {
+        if (!connect) {
             return;
         }
-        removeIoConnectionClient(spClient->getClientId());
-    }
 
-    void RpcServiceImpl::removeIoConnectionClient(uint32_t clientId) {
+        uint32_t clientId = getNewClientId();
+        auto spClient = std::make_shared<RpcServiceClientEntry>(clientId, *this, connect);
+        spClient->start();
+        DEBUG_INFO("add client of id: %u", clientId);
         std::lock_guard<std::mutex> g(m_clientsMutex);
-        if (m_clients.find(clientId) == m_clients.end()) {
-            DEBUG_ERROR("cannot found client of id: %u", clientId);
-        }
-
-        m_clients.erase(clientId);
-
-        DEBUG_INFO("remove client of id: %u", clientId);
+        m_clients[clientId] = std::move(spClient);
     }
 
-    int RpcServiceImpl::handleData(const char* pData, int len, std::string& resultString) {
-        int res = -1;
+    void RpcServiceImpl::handleClientClose(const uint32_t clientId) {
+        ThreadPool::getInstance().commit([this, clientId](){onHandleClientClose(clientId);});
+    }
 
-        if (!pData) {
-            DEBUG_ERROR("invalid param");
-            return res;
-        }
-
-        std::shared_ptr<RpcSerialer> pSerialer;
+    void RpcServiceImpl::handleIoServerEvent(const TcpIoServer::TcpIoServerEvent& event) {
+        switch (event)
         {
-            std::lock_guard<std::mutex> guard(m_instanceMutex);
-            if (m_state != COMPONENT_STATE_STARTED) {
-                DEBUG_ERROR("invalid state");
-                return res;
-            }
-
-            if (!m_serialer) {
-                DEBUG_ERROR("no serialer");
-                return res;
-            }
-
-            pSerialer = m_serialer;
-        }
-
-        MessageType_e msgType = static_cast<MessageType_e>(pSerialer->getMessageType(pData, len));
-        int msgId = pSerialer->getMessageId(pData, len);
-        std::string msgName = pSerialer->getMessageName(pData, len);
-
-        DEBUG_INFO("receive message: type - %d, msgId - %d, msgName: %s", msgType, msgId, msgName.c_str());
-        switch(msgType)
-        {
-            case MESSAGE_TYPE_COMMAND:
+            case TcpIoServer::TcpIoServerEvent::SERVER_IO_ERROR:
             {
-                pSerialer->serialMessageMeta(MESSAGE_TYPE_REPLAY, msgName, msgId, resultString);
-                res = handleCommand(msgName, pData, len, resultString);
-                break;
-            }
-            case MESSAGE_TYPE_REGISTER:
-            {
-                res = handleRegister(msgName, pData, len, resultString);
+                stop();
                 break;
             }
             default:
-                DEBUG_ERROR("unhandle message type: %d", msgType);
                 break;
         }
+    }
 
-        if (res < 0) {
-            DEBUG_ERROR("handle data fail");
+    std::optional<std::string> RpcServiceImpl::handleCommand(const std::string& cmd, std::string_view data) {
+        ServiceInterface::ServiceFunctionType func;
+
+        {
+            std::lock_guard<std::mutex> g(m_functionsMutex);
+            if (m_functions.find(cmd) == m_functions.end()) {
+                DEBUG_ERROR("unknown function: %s", cmd.c_str());
+            }
+            else {
+                func = m_functions[cmd];
+            }
         }
-        return res;
+
+        if (func) {
+            return func(data);
+        }
+        else {
+            throw "invalid msg id";
+        }
     }
 
-    int RpcServiceImpl::handleCommand(const std::string& funcName, const char* pData, int len, std::string& resultString)
-    {
-        int res = 0;
-        std::function<int (const char*, int, std::string&)> func;
-
-        do {
-            {
-                std::lock_guard<std::mutex> guard(m_functionsMutex);
-                if (m_functions.find(funcName) == m_functions.end()) {
-                    DEBUG_ERROR("unknown function: %s", funcName.c_str());
-                    res = -1;
-                    break;
-                }
-                else {
-                    func = m_functions[funcName];
-                }
+    void RpcServiceImpl::onHandleClientClose(const uint32_t clientId) {
+        {
+            std::lock_guard<std::mutex> gEvent(m_eventMutex);
+            for (auto& item : m_events) {
+                auto& clients = item.second;
+                clients.erase(std::remove(clients.begin(), clients.end(), clientId), clients.end());
             }
+        }
 
-            res = func(pData, len, resultString);
-            if (res < 0) {
-                DEBUG_ERROR("handle command: %s fail", funcName.c_str());
-            }
-        } while(0);
-
-        return res;
-    }
-
-    int RpcServiceImpl::handleRegister(const std::string& eventName, const char* pData, int len, std::string& resultString)
-    {
-        //TODO: implementation
-        return 0;
+        std::lock_guard<std::mutex> gClient(m_clientsMutex);
+        if (m_clients.find(clientId) == m_clients.end()) {
+            DEBUG_ERROR("unknown client id: %u", clientId);
+            return;
+        }
+        DEBUG_INFO("erase client of id: %u", clientId);
+        m_clients[clientId]->stop();
+        m_clients.erase(clientId);
     }
 
     uint32_t RpcServiceImpl::getNewClientId()
@@ -328,5 +251,9 @@ namespace rpc
         static uint32_t index = 0;
         return ++index;
     }
-}
+
+    int RpcServiceImpl::getNewMessageId() {
+        static int index = 0;
+        return ++index;
+    }
 }

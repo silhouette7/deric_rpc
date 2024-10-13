@@ -1,13 +1,12 @@
 #ifndef _RPC_CONFIG_H_
 #define _RPC_CONFIG_H_
 
-#include <unordered_map>
-#include <string>
 #include "config_interface.h"
 
-namespace deric
-{
-namespace rpc
+#include <string>
+#include <unordered_map>
+
+namespace deric::rpc
 {
 class RpcConfig : public ConfigInterface
 {
@@ -26,7 +25,6 @@ private:
     std::unordered_map<std::string, std::string> m_configItemMap;
 };
 
-}
 }
 
 #endif

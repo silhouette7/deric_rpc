@@ -7,6 +7,14 @@
 #include "rpc_config.h"
 #include "deric_process_entry.h"
 
+void helloWorld() {
+    std::cout << "hello world" << std::endl;
+}
+
+void hello(const std::string& str) {
+    std::cout << str << std::endl;
+}
+
 class Caculator {
 public:
     int add(int a, int b) {
@@ -20,12 +28,8 @@ public:
     }
 };
 
-void hello(const std::string& str) {
-    std::cout << str << std::endl;
-}
-
 int main() {
-    deric::rpc::DericProcessEntry process;
+    deric::DericProcessEntry process;
     process.init();
 
     deric::rpc::RpcConfig serviceConfig;
@@ -34,11 +38,14 @@ int main() {
     std::shared_ptr<deric::rpc::RpcServiceEntry> serviceEntry = std::make_shared<deric::rpc::RpcServiceEntry>(RPC_SERVICE_DERIC_TEST);
     serviceEntry->init(serviceConfig);
 
+    serviceEntry->registerMethod(RPC_SERVICE_DERIC_TEST_HELLO_WORLD, helloWorld);
     serviceEntry->registerMethod(RPC_SERVICE_DERIC_TEST_HELLO, hello);
 
     Caculator test_cal;
     serviceEntry->registerMethod(RPC_SERVICE_DERIC_TEST_ADD, &Caculator::add, &test_cal);
     serviceEntry->registerMethod(RPC_SERVICE_DERIC_TEST_MINOR, &Caculator::minor, &test_cal);
+
+    serviceEntry->registerEvent(RPC_SERVICE_EVENT_DERIC_TEST_STOP);
 
     serviceEntry->start();
 
@@ -48,10 +55,13 @@ int main() {
         std::getline(std::cin, inputString);
         if (inputString.compare(endString) == 0) {
             std::cout << "close the server" << std::endl;
+            serviceEntry->postEvent(RPC_SERVICE_EVENT_DERIC_TEST_STOP);
 
             serviceEntry->stop();
-            serviceEntry->unregisterMethod(RPC_SERVICE_DERIC_TEST_HELLO);
+            serviceEntry->unregisterMethod(RPC_SERVICE_DERIC_TEST_MINOR);
             serviceEntry->unregisterMethod(RPC_SERVICE_DERIC_TEST_ADD);
+            serviceEntry->unregisterMethod(RPC_SERVICE_DERIC_TEST_HELLO);
+            serviceEntry->unregisterMethod(RPC_SERVICE_DERIC_TEST_HELLO_WORLD);
             serviceEntry->deInit();
             process.deinit();
             break;

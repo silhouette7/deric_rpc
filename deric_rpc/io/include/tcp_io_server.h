@@ -1,54 +1,64 @@
 #ifndef _TCP_IO_SERVER_H_
 #define _TCP_IO_SERVER_H_
 
-#include <memory>
-#include <map>
-
-#include "component_public.h"
-#include "io_server_client_interface.h"
 #include "tcp_io_connection.h"
+#include "tcp_io_server_entry.h"
+
+#include <functional>
+#include <map>
+#include <memory>
+#include <mutex>
 
 namespace deric
 {
-namespace rpc
-{
-typedef struct {
-    std::string ip;
-    int port;
-    int maxConnectionNumber;
-    std::shared_ptr<IoServerClientInterface> serverClient;
-} TcpIoServerConfig_s;
-
-class TcpIoServer : public std::enable_shared_from_this<TcpIoServer>
+class TcpIoServer
 {
 public:
-    TcpIoServer();
+    constexpr static int DEFAULT_MAX_CONNECTION_NUMBER = 100;
+
+    enum class TcpIoServerEvent {
+        SERVER_IO_ERROR
+    };
+
+    using TcpIoServerNewConnectCallbackType = std::function<void(const std::shared_ptr<TcpIoConnection>&)>;
+
+    using TcpIoServerEventCallbackType = std::function<void(const TcpIoServerEvent&)>;
+
+    TcpIoServer(std::string_view ip, int port);
+
+    TcpIoServer(std::string_view ip, int port, int maxConnectionNumber);
 
     ~TcpIoServer();
-
-    int init(const TcpIoServerConfig_s& config);
-
-    int deInit();
 
     int start();
 
     int stop();
 
-    int getFd();
+    void setNewConnectCallback(const TcpIoServerNewConnectCallbackType& callback);
 
-    int onConnectRequest();
+    void setNewConnectCallback(TcpIoServerNewConnectCallbackType&& callback);
 
-    void onIoError();
+    void setEventCallback(const TcpIoServerEventCallbackType& callback);
+
+    void setEventCallback(TcpIoServerEventCallbackType&& callback);
+
+    void onConnectRequest(int acceptSocket);
+
+    void onIoError(IoMemberError_e error);
+
+    void onIoClose(const std::shared_ptr<TcpIoConnection>& connect);
+
 public:
-    ComponentState_e m_state;
+    bool m_isStarted;
     std::string m_ip;
     int m_port;
     int m_maxConnectionNumber;
-    int m_socketFd;
-    std::shared_ptr<IoServerClientInterface> m_client;
-    std::shared_ptr<IoMember> m_ioEntry;
+    std::shared_ptr<TcpIoServerEntry> m_ioEntry;
+    TcpIoServerNewConnectCallbackType m_connectCallback;
+    TcpIoServerEventCallbackType m_eventCallback;
+    std::mutex m_connectionsLock;
+    std::unordered_map<int, std::shared_ptr<TcpIoConnection>> m_connections;
 };
-}
 }
 
 #endif

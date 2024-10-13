@@ -1,10 +1,9 @@
-#include "io_module.h"
-#include "deric_debug.h"
 #include "deric_process.h"
+#include "deric_debug.h"
+#include "io_module.h"
+#include "thread_pool.h"
 
 namespace deric
-{
-namespace rpc
 {
 DericProcess::DericProcess() :
     m_init(false),
@@ -26,6 +25,13 @@ int DericProcess::init() {
     }
 
     DEBUG_INFO("init process");
+
+    res = ThreadPool::getInstance().init(ThreadPool::ThreadPoolConfig_s{});
+    if (res < 0) {
+        DEBUG_ERROR("init thread pool fail");
+        return res;
+    }
+
     IoModuleConfig_s ioModuleConfig = {1024};
     res = IoModule::getInstance().init(ioModuleConfig);
     if (res < 0) {
@@ -66,9 +72,14 @@ int DericProcess::deinit()
         return res;
     }
 
+    res = ThreadPool::getInstance().deinit();
+    if (res < 0) {
+        DEBUG_ERROR("deinit thread pool fail");
+        return res;
+    }
+
     DEBUG_INFO("process deinit successfully");
     m_init = false;
     return res;
-}
 }
 }

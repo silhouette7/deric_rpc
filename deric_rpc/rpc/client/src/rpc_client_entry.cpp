@@ -1,7 +1,7 @@
 #include "rpc_client_entry.h"
 #include "rpc_client_impl.h"
 #include "rpc_config.h"
-#include "message_public.h"
+#include "rpc_messages.h"
 #include "deric_debug.h"
 
 namespace deric
@@ -14,34 +14,34 @@ namespace rpc
             return -1;
         }
 
-        m_clientImpl = std::make_shared<RpcClientImpl>();
-        std::weak_ptr<RpcClientEntry> wp = shared_from_this();
-        auto callback = [wp](const std::string& str)->void{auto sp = wp.lock();
-                                                           if(sp) sp->serviceMessageCallback(str);};
+        m_clientImpl = std::make_unique<RpcClientImpl>();
+        auto callback = [this](const std::string& str){serviceMessageCallback(str);};
         if (0 > m_clientImpl->registerMessageCallback(std::move(callback))) {
             DEBUG_ERROR("unable to register message callback");
             m_clientImpl.reset();
             return -1;
         }
     
-        m_serialer = std::make_unique<RpcSerialer>();
-
         return 0;
     }
 
     int RpcClientEntry::deinit() {
-        if (m_serialer) {
-            m_serialer.reset();
-        }
-
         if (m_clientImpl) {
             m_clientImpl.reset();
         }
 
         m_serviceBook.clear();
+        m_clientImpl.reset();
 
-        std::lock_guard<std::mutex> lg(m_waitingLock);
-        m_waitingItems.clear();
+        {
+            std::lock_guard<std::mutex> g(m_replayLock);
+            m_replyCallbacks.clear();
+        }
+
+        {
+            std::lock_guard<std::mutex> g(m_eventLock);
+            m_eventCallback.clear();
+        }
         return 0;
     }
 
@@ -70,11 +70,7 @@ namespace rpc
 
         DEBUG_INFO("connecting to serivce - %s, with ip - %s port - %s", serviceName.c_str(), serviceIp.c_str(), servicePort.c_str());
 
-        ClientConnectionConfig_s config;
-        config.serviceIp = std::move(serviceIp);
-        config.servicePort = std::move(servicePort);
-
-        if (0 > m_clientImpl->connect(config)) {
+        if (0 > m_clientImpl->connect(serviceIp, servicePort)) {
             DEBUG_ERROR("unable to connect to service: %s", serviceName.c_str());
             return -1;
         }
@@ -93,37 +89,97 @@ namespace rpc
         return m_clientImpl->disconnect();
     }
 
+    void RpcClientEntry::subscribeToEvent(const std::string& eventName, const RpcClientEntryEventCallbackType& callback) {
+        std::lock_guard<std::mutex> g(m_eventLock);
+        m_eventCallback[eventName] = callback;
+        _subscribe(eventName, true);
+    }
+
+    void RpcClientEntry::subscribeToEvent(const std::string& eventName, RpcClientEntryEventCallbackType&& callback) {
+        std::lock_guard<std::mutex> g(m_eventLock);
+        m_eventCallback[eventName] = std::move(callback);
+        _subscribe(eventName, true);
+    }
+
+    void RpcClientEntry::unsubscribeToEvent(const std::string& eventName) {
+        std::lock_guard<std::mutex> g(m_eventLock);
+        m_eventCallback.erase(eventName);
+        _subscribe(eventName, false);
+    }
+
     void RpcClientEntry::serviceMessageCallback(const std::string& msg) {
-        if (!m_serialer) {
-            DEBUG_ERROR("not init yet");
+        std::optional<serialer::SerialerStr> serialStr = serialer::getSerialStrFromRpcStr(msg);
+        if (!serialStr) {
+            DEBUG_ERROR("invalid params");
             return;
         }
+        auto [metaStr, payloadStr] = serialStr.value();
 
-        int msgType = m_serialer->getMessageType(msg.data(), msg.length());
-        DEBUG_INFO("receive msg len: %lu, type: %d", msg.length(), msgType);
+        std::optional<serialer::MessageMeta> meta = serialer::getMessageData<serialer::MessageMeta>(metaStr);
+        if (!meta) {
+            DEBUG_ERROR("invalid params");
+            return; 
+        }
+        auto [msgType, msgName, msgId, result] = meta.value();
+
+        DEBUG_INFO("receive msg type: %d, msg name: %s, msg id: %d, result: %d", static_cast<int>(msgType), msgName.c_str(), msgId, result);
 
         switch (msgType)
         {
-            case MESSAGE_TYPE_REPLAY:
+            case MessageType::REPLAY:
             {
-                int msgId = m_serialer->getMessageId(msg.data(), msg.length());
-                std::lock_guard<std::mutex> lg(m_waitingLock);
-                DEBUG_INFO("receive msgId: %d", msgId);
-                if (m_waitingItems.find(msgId) == m_waitingItems.end()) {
-                    DEBUG_ERROR("not found msgId: %d", msgId);
-                    break;
+                InvokeReplyCallbakType replayCallback;
+                {
+                    std::lock_guard<std::mutex> g(m_replayLock);
+                    if (m_replyCallbacks.find(msgId) != m_replyCallbacks.end()) {                    
+                        replayCallback = std::move(m_replyCallbacks[msgId]);
+                        m_replyCallbacks.erase(msgId);
+                    }
                 }
-                auto& item = m_waitingItems[msgId];
-                item.msg = msg;
-                item.cv.notify_one();
+                if (result == true && replayCallback) {
+                    replayCallback(payloadStr);
+                }
+                else {
+                    DEBUG_ERROR("unhandled msg: type - %d, name - %s, id - %d", static_cast<int>(msgType), msgName.c_str(), msgId);
+                }
+                break;
+            }
+            case MessageType::NOTIFY:
+            {
+                RpcClientEntryEventCallbackType eventCallback;
+                {
+                    std::lock_guard<std::mutex> g(m_eventLock);
+                    auto it = m_eventCallback.find(msgName);
+                    if (it != m_eventCallback.end()) {
+                        eventCallback = it->second;
+                    }
+                }
+                if (eventCallback) {
+                    eventCallback();
+                }
+                else {
+                    DEBUG_ERROR("unhandled event name - %s, id - %d", msgName.c_str(), msgId);
+                }
                 break;
             }
             default:
             {
-                DEBUG_ERROR("receive unknown msg type: %d", msgType);
+                DEBUG_ERROR("receive unknown msg type: %d", static_cast<int>(msgType));
                 break;
             }
         }
+    }
+
+    int RpcClientEntry::_subscribe(const std::string& name, bool subscribe) {
+        if (!m_clientImpl) {
+            DEBUG_ERROR("no init yet");
+            return -1;
+        }
+
+        serialer::MessageMeta cmdMeta = {subscribe ? MessageType::REGISTER : MessageType::UNREGISTER, name, 0, true};
+        std::string rpcMeta = serialer::serialMessageData(std::move(cmdMeta));
+        std::string rpcStr = serialer::generateRpcStr(rpcMeta, "");
+        return m_clientImpl->sendMsg(rpcStr);
     }
 
     int RpcClientEntry::_invoke(const std::string& invokeStr) {
@@ -133,48 +189,6 @@ namespace rpc
         }
 
         return m_clientImpl->sendMsg(invokeStr);
-    }
-
-    int RpcClientEntry::_waitForResult(int msgId, std::string& resultStr) {
-        if (0 > _addResultWaitingItem(msgId)) {
-            DEBUG_ERROR("unable add waiting item");
-            return -1;
-        }
-
-        std::unique_lock<std::mutex> ul(m_waitingLock);
-        auto& item = m_waitingItems[msgId];
-        item.cv.wait(ul);
-        resultStr = std::move(item.msg);
-
-        ul.unlock();
-        if (0 > _removeResultWaitingItem(msgId)) {
-            DEBUG_ERROR("unable to remove waiting item");
-        }
-
-        return 0;
-    }
-
-    int RpcClientEntry::_addResultWaitingItem(int msgId) {
-        std::lock_guard<std::mutex> lg(m_waitingLock);
-        if (m_waitingItems.find(msgId) != m_waitingItems.end()) {
-            DEBUG_ERROR("already add item for msgId: %d yet", msgId);
-            return -1;
-        }
-
-        m_waitingItems[msgId];
-
-        return 0;
-    }
-
-    int RpcClientEntry::_removeResultWaitingItem(int msgId) {
-        std::lock_guard<std::mutex> lg(m_waitingLock);
-        if (m_waitingItems.find(msgId) == m_waitingItems.end()) {
-            DEBUG_ERROR("not add item for msgId: %d yet", msgId);
-            return -1;
-        }
-
-        m_waitingItems.erase(msgId);
-        return 0;
     }
 
     int RpcClientEntry::_getMessageId() {

@@ -3,14 +3,11 @@
 
 namespace deric
 {
-namespace rpc
-{
 int DericProcessEntry::init() {
     return DericProcess::instance().init();
 }
 
 int DericProcessEntry::deinit() {
     return DericProcess::instance().deinit();
-}
 }
 }

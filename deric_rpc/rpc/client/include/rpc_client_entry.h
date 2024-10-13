@@ -1,24 +1,33 @@
 #ifndef _RPC_CLIENT_ENTRY_H_
 #define _RPC_CLIENT_ENTRY_H_
 
-#include "rpc_serialer.h"
-#include "config_interface.h"
 #include "client_interface.h"
-#include "message_public.h"
-#include <string>
-#include <tuple>
-#include <memory>
-#include <condition_variable>
-#include <mutex>
-#include <map>
+#include "config_interface.h"
+#include "function_helper.h"
+#include "rpc_messages.h"
+#include "rpc_serialer.h"
 
-namespace deric
+#include <condition_variable>
+#include <future>
+#include <map>
+#include <memory>
+#include <optional>
+#include <mutex>
+#include <tuple>
+#include <string>
+#include <string_view>
+
+namespace deric::rpc
 {
-namespace rpc
-{
-class RpcClientEntry : public std::enable_shared_from_this<RpcClientEntry> 
+class RpcClientEntry
 {
 public:
+    using RpcClientEntryEventCallbackType = std::function<void()>;
+
+    RpcClientEntry() = default;
+
+    ~RpcClientEntry() = default;
+
     int init(const ConfigInterface& config);
 
     int deinit();
@@ -27,87 +36,68 @@ public:
 
     int disconnect();
 
-    template<typename... Args>
-    int invoke(const std::string& func, Args&&... args) {
-        if (!m_serialer || !m_clientImpl) {
-            return -1;
-        }
+    void subscribeToEvent(const std::string& eventName, const RpcClientEntryEventCallbackType& callback);
 
-        std::string serialStr;
-        int msgId = _getMessageId();
-        if (0 > m_serialer->serialMessageMeta(MESSAGE_TYPE_COMMAND, func, msgId, serialStr)) {
-            return -1;
-        }
-        auto as = std::make_tuple(std::forward<Args>(args)...);
-        if (0 > m_serialer->serialMessageData(as, serialStr)) {
-            return -1;
-        }
+    void subscribeToEvent(const std::string& eventName, RpcClientEntryEventCallbackType&& callback);
 
-        return _invoke(serialStr);
+    void unsubscribeToEvent(const std::string& eventName);
+
+    template <typename R>
+    void invokeResCallback(std::promise<R>& p, std::string_view data) {
+        if constexpr (std::is_void_v<R>) {
+            (void)data;
+            p.set_value();
+        }
+        else {
+            std::optional<R> o = serialer::getMessageData<R>(data);
+            if (o) {
+                p.set_value(o.value());
+            }
+        }
     }
 
     template<typename R, typename... Args>
-    typename std::enable_if<!std::is_void<R>::value, int>::type invokeWithResultSync(const std::string& func, R& returnValue, Args&&... args) {
-        if (!m_serialer || !m_clientImpl) {
-            return -1;
-        }
-
-        std::string serialStr;
+    std::future<R> invoke(std::string_view funcName, Args&&... args) {
+        std::promise<R> p;
+        auto res = p.get_future();
+        auto replayCallback = [p = std::move(p), this](std::string_view data)mutable {invokeResCallback(p, data);};
         int msgId = _getMessageId();
-        if (0 > m_serialer->serialMessageMeta(MESSAGE_TYPE_COMMAND, func, msgId, serialStr)) {
-            return -1;
-        }
-        auto as = std::make_tuple(std::forward<Args>(args)...);
-        if (0 > m_serialer->serialMessageData(as, serialStr)) {
-            return -1;
+        
+        {
+            std::lock_guard<std::mutex> g(m_replayLock);
+            m_replyCallbacks[msgId] = functionhelper::make_copyable_function(std::move(replayCallback));
         }
 
-        if (0 > _invoke(serialStr)) {
-            return -1;
+        serialer::MessageMeta cmdMeta = {MessageType::COMMAND, std::string(funcName), msgId, true};
+        std::string rpcMeta = serialer::serialMessageData(std::move(cmdMeta));
+        std::string rpcData = serialer::serialMessageData(std::make_tuple(std::forward<Args>(args)...));
+        std::string rpcStr = serialer::generateRpcStr(rpcMeta, rpcData);
+        if (0 > _invoke(rpcStr)) {
+            std::lock_guard<std::mutex> g(m_replayLock);
+            m_replyCallbacks.erase(msgId);
         }
-
-        std::string resultStr;
-        if (0 > _waitForResult(msgId, resultStr)) {
-            return -1;
-        }
-
-        returnValue = m_serialer->getMessageData<R>(resultStr.data(), resultStr.length());
-
-        return 0;
-    }
- 
-    template<typename... Args, typename O>
-    int invokeWithResultAsync(const std::string& func, Args&&... args, O& observer) {
-        // Not implement
-        return 0;
+        return res;
     }
 
     void serviceMessageCallback(const std::string& msg);
 
-    static const int DEFAULT_RPC_CLIENT_BUFFER_SIZE = 2048;
-
 private:
-    typedef struct {
-        std::string msg;
-        std::condition_variable cv;
-    } ClientWaitingItem;
+    static constexpr int DEFAULT_RPC_CLIENT_BUFFER_SIZE = 2048;
+
+    using InvokeReplyCallbakType = std::function<void(std::string_view)>;
+
+    int _subscribe(const std::string& name, bool subscribe);
 
     int _invoke(const std::string& invokeStr);
 
-    int _waitForResult(int msgId, std::string& resultStr);
-
-    int _addResultWaitingItem(int msgId);
-
-    int _removeResultWaitingItem(int msgId);
-
     int _getMessageId();
 
-    std::unique_ptr<RpcSerialer> m_serialer;
-    std::shared_ptr<ClientInterface> m_clientImpl;
+    std::unique_ptr<ClientInterface> m_clientImpl;
     std::string m_serviceBook;
-    std::mutex m_waitingLock;
-    std::map<int, ClientWaitingItem> m_waitingItems;
+    std::mutex m_replayLock;
+    std::mutex m_eventLock;
+    std::map<int, InvokeReplyCallbakType> m_replyCallbacks;
+    std::map<std::string, RpcClientEntryEventCallbackType> m_eventCallback;
 };
-}
 }
 #endif

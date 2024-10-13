@@ -5,8 +5,6 @@
 
 namespace deric
 {
-namespace rpc
-{
 class ConfigInterface
 {
 public:
@@ -18,7 +16,6 @@ public:
 
     virtual int getValue(const std::string& key, std::string& val) const = 0;
 };   
-}
 }
 
 #endif

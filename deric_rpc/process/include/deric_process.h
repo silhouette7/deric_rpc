@@ -5,8 +5,6 @@
 
 namespace deric
 {
-namespace rpc
-{
 class DericProcess
 {
 public:
@@ -27,6 +25,5 @@ private:
     bool m_init;
     std::mutex m_initMutex;
 };
-}
 }
 #endif

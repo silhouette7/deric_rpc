@@ -1,19 +1,16 @@
+#include "rpc_service_entry.h"
+
+#include "deric_debug.h"
+#include "rpc_service_impl.h"
+
 #include <cstdlib>
 #include <functional>
 
-#include "deric_debug.h"
-#include "rpc_serialer.h"
-#include "rpc_service_impl.h"
-#include "rpc_service_entry.h"
-
-namespace deric
+namespace deric::rpc
 {
-namespace rpc
-{
-    RpcServiceEntry::RpcServiceEntry(const std::string& serviceName) :
+    RpcServiceEntry::RpcServiceEntry(std::string_view serviceName) :
         m_serviceName(serviceName),
-        m_serviceImpl(std::make_shared<RpcServiceImpl>(m_serviceName)),
-        m_funcHelper(std::make_shared<FunctionHelper>())
+        m_serviceImpl(nullptr)
     {
         DEBUG_INFO("construct");
     }
@@ -24,104 +21,110 @@ namespace rpc
     }
 
     int RpcServiceEntry::init(const ConfigInterface& config) {
-        int res = -1;
-        do {
-            if (!m_serviceImpl) {
-                DEBUG_ERROR("no service impl");
-                res = -1;
-                break;
-            }
-            
-            std::shared_ptr<RpcSerialer> serialer = std::make_shared<RpcSerialer>();
+        std::string ip, portStr, maxConnectionNumberStr;
+        int port = 0, maxConnectionNumber = -1;
+        if (0 > config.getValue("IP", ip)) {
+            DEBUG_ERROR("no IP indicated in the config");
+            return -1;
+        }
 
-            res = m_funcHelper->setSerialer(serialer);
-            if (0 > res) {
-                DEBUG_ERROR("set serialer fail with res: %d", res);
-                break;
-            }
+        if (0 > config.getValue("Port", portStr)) {
+            DEBUG_ERROR("no port indicated in the config");
+            return -1;
+        }
+        try {
+            port = std::stoi(portStr);
+        }
+        catch(...) {
+            DEBUG_ERROR("invalid port param: %s", portStr.c_str());
+            return -1;
+        }
 
-            ServiceConfig_s serviceConfig;
-            std::string ip, port;
-            if (0 > config.getValue("IP", ip)) {
-                DEBUG_ERROR("no IP indicated in the config");
-                res = -1;
-                break;
+        if (0 == config.getValue("MaxConnectionNumber", maxConnectionNumberStr)) {
+            try {
+                maxConnectionNumber = std::stoi(maxConnectionNumberStr);
             }
-            if (0 > config.getValue("Port", port)) {
-                DEBUG_ERROR("no port indicated in the config");
-                res = -1;
-                break;
+            catch(...) {
+                DEBUG_ERROR("invalid maxConnectionNumber param: %s", maxConnectionNumberStr.c_str());
             }
-            serviceConfig.serviceIp = std::move(ip);
-            serviceConfig.servicePort = std::stoi(port);
-            serviceConfig.serialer = serialer;
-            res = m_serviceImpl->init(serviceConfig);
-            if (0 > res) {
-                DEBUG_ERROR("service init fail with res: %d", res);
-                break;
-            }
-        } while(0);
-        return res;
+        }
+
+        if (0 < maxConnectionNumber) {
+            m_serviceImpl = std::make_unique<RpcServiceImpl>(m_serviceName, ip, port, maxConnectionNumber);
+        }
+        else {
+            m_serviceImpl = std::make_unique<RpcServiceImpl>(m_serviceName, ip, port);
+        }
+
+        return 0;
     }
 
     int RpcServiceEntry::deInit() {
-        int res = -1;
-        if (!m_serviceImpl) {
-            DEBUG_ERROR("no service impl");
-            res = -1;
-        }
-        else {
-            res = m_serviceImpl->deInit();
-        }
-        return res;
+        m_serviceImpl.reset();
+
+        return 0;
     }
 
     int RpcServiceEntry::start() {
-        int res = -1;
         if (!m_serviceImpl) {
             DEBUG_ERROR("no service impl");
-            res = -1;
+            return -1;
         }
-        else {
-            res = m_serviceImpl->start();
-        }
-        return res;
+
+        return m_serviceImpl->start();
     }
 
     int RpcServiceEntry::stop()  {
-        int res = -1;
         if (!m_serviceImpl) {
             DEBUG_ERROR("no service impl");
-            res = -1;
+            return -1;
         }
-        else {
-            res = m_serviceImpl->stop();
-        }
-        return res;
+
+        return m_serviceImpl->stop();
     }
 
-    int RpcServiceEntry::registerMethodImpl(const std::string& funcName, const ServiceInterface::ServiceFunctionType& func) {
-        int res = -1;
+    int RpcServiceEntry::registerEvent(const std::string& eventName) {
         if (!m_serviceImpl) {
             DEBUG_ERROR("no service impl");
-            res = -1;
+            return -1;
         }
-        else {
-            res = m_serviceImpl->registerMethod(funcName, func);
+
+        return m_serviceImpl->registerEvent(eventName);
+    }
+
+    int RpcServiceEntry::unregisterEvent(const std::string& eventName) {
+        if (!m_serviceImpl) {
+            DEBUG_ERROR("no service impl");
+            return -1;
         }
-        return res;
+
+        return m_serviceImpl->unregisterEvent(eventName);
+    }
+
+    int RpcServiceEntry::postEvent(const std::string& eventName) {
+        if (!m_serviceImpl) {
+            DEBUG_ERROR("no service impl");
+            return -1;
+        }
+
+        return m_serviceImpl->postEvent(eventName);
     }
 
     int RpcServiceEntry::unregisterMethod(const std::string& funcName) {
-        int res = -1;
         if (!m_serviceImpl) {
             DEBUG_ERROR("no service impl");
-            res = -1;
+            return -1;
         }
-        else {
-            res = m_serviceImpl->unregisterMethod(funcName);
-        }
-        return res;
+
+        return m_serviceImpl->unregisterMethod(funcName);
     }
-}
+
+    int RpcServiceEntry::registerMethodImpl(const std::string& funcName, ServiceInterface::ServiceFunctionType&& func) {
+        if (!m_serviceImpl) {
+            DEBUG_ERROR("no service impl");
+            return -1;
+        }
+
+        return m_serviceImpl->registerMethod(funcName, std::forward<ServiceInterface::ServiceFunctionType>(func));
+    }
 }

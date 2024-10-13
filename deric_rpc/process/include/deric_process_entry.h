@@ -3,8 +3,6 @@
 
 namespace deric
 {
-namespace rpc
-{
 class DericProcessEntry
 {
 public:
@@ -12,6 +10,5 @@ public:
 
     int deinit();
 };
-}
 }
 #endif

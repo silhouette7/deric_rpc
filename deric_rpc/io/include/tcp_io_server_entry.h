@@ -1,39 +1,48 @@
 #ifndef _TCP_IO_SERVER_ENTRY_H_
 #define _TCP_IO_SERVER_ENTRY_H_
 
-#include <memory>
-
 #include "io_interface.h"
-#include "tcp_io_server.h"
+
+#include <functional>
 
 namespace deric
-{
-namespace rpc
 {
 class TcpIoServerEntry : public IoMember
 {
 public:
-    TcpIoServerEntry(int socketFd, std::shared_ptr<TcpIoServer> serverImpl);
+    using TcpIoServerEntryConnectCallbackType = std::function<void(int)>;
+
+    using TcpIoServerEntryErrorCallbackType = std::function<void(IoMemberError_e)>;
+
+    TcpIoServerEntry(int socketFd);
 
     ~TcpIoServerEntry();
 
     int getFd() override;
 
-    int onReadAvailable() override;
+    void onReadAvailable() override;
 
-    int onWriteAvailable() override;
+    void onWriteAvailable() override;
 
-    int onControlAvailable() override;
+    void onControlAvailable() override;
 
-    int sendData(const char* data, int len) override;
+    void onIoError(IoMemberError_e error) override;
 
-    IoMemberErrorAction onIoError(IoMemberError_e error) override;
+    int sendData(std::string_view data) override;
+
+    void setConnectCallback(const TcpIoServerEntryConnectCallbackType& callback);
+
+    void setConnectCallback(TcpIoServerEntryConnectCallbackType&& callback);
+
+    void setErrorCallback(const TcpIoServerEntryErrorCallbackType& callback);
+
+    void setErrorCallback(TcpIoServerEntryErrorCallbackType&& callback);
 
 private:
     int m_socketFd;
-    std::shared_ptr<TcpIoServer> m_serverImpl;
+    TcpIoServerEntryConnectCallbackType m_connectCallback;
+    TcpIoServerEntryErrorCallbackType m_errorCallback;
 };
-}
 }
 
 #endif

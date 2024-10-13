@@ -6,25 +6,29 @@ namespace deric
 {
 namespace rpc
 {
-    int RpcClientImpl::connect(const ClientConnectionConfig_s& _config) {
+    RpcClientImpl::~RpcClientImpl() {
+        if (m_ioConnection) {
+            m_ioConnection->unsetIoDataCallback();
+            m_ioConnection->unsetConnectCallback();
+            m_ioConnection->unsetCloseCallback();
+        }
+    }
+
+    int RpcClientImpl::connect(std::string_view ip, std::string_view port) {
         std::shared_ptr<TcpIoConnection> io = std::make_shared<TcpIoConnection>();
 
-        io->setIoClient(shared_from_this());
+        io->setIoDataCallback([this](const std::shared_ptr<TcpIoConnection>& connect, const std::string& data){handleData(connect, data);});
+        io->setConnectCallback([this](const std::shared_ptr<TcpIoConnection>& connect){handleConnect(connect);});
+        io->setCloseCallback([this](const std::shared_ptr<TcpIoConnection>& connect){handleClose(connect);});
 
-        if (0 > io->start(_config.serviceIp, std::stoi(_config.servicePort))) {
-            DEBUG_ERROR("unable to start the io connection to ip: %s, port: %s", _config.serviceIp.c_str(), _config.serviceIp.c_str());
+        if (0 > io->connect(ip, std::stoi(std::string(port)))) {
+            DEBUG_ERROR("unable to start the io connection to ip: %s, port: %s", ip.data(), port.data());
             io.reset();
             return -1;
         }
 
-        if (0 > IoModule::getInstance().addIoMember(io)) {
-            DEBUG_ERROR("unable to add io member");
-            io->stop();
-            io.reset();
-            return -1;
-        }
-
-        setIoConnection(io);
+        IoModule::getInstance().addIoMember(io);
+        m_ioConnection = std::move(io);
 
         return 0;
     }
@@ -35,22 +39,20 @@ namespace rpc
             return 0;
         }
 
-        if (0 > m_ioConnection->stop()) {
+        if (0 > m_ioConnection->shutdown()) {
             DEBUG_ERROR("unable to stop the io");
             return -1;
         }
-
-        m_ioConnection.reset();
         return 0;
     }
 
-    int RpcClientImpl::sendMsg(const std::string& msg) {
+    int RpcClientImpl::sendMsg(std::string_view msg) {
         if (!m_ioConnection) {
             DEBUG_ERROR("no io connection");
             return -1;
         }
 
-        return m_ioConnection->sendData(msg.data(), msg.length());
+        return m_ioConnection->sendData(msg);
     }
 
     int RpcClientImpl::registerMessageCallback(const ClientMessageCallbackType& func) {
@@ -58,53 +60,42 @@ namespace rpc
         return 0;
     }
 
-    int RpcClientImpl::handleEvent(IoConnectionEvent_e event, void* data) {
-        switch(event)
-        {
-            case TCP_IO_CONNECTION_EVENT_CLOSE:
-            {
-                m_ioConnection.reset();
-                break;
-            }
-            default:
-            {
-                DEBUG_ERROR("receive unhandled io connection event: %d", event);
-                break;
-            }
-        }
-
+    int RpcClientImpl::registerMessageCallback(ClientMessageCallbackType&& func) {
+        m_msgCallback = std::move(func);
         return 0;
     }
 
-    int RpcClientImpl::handleData(const char *pData, int len) {
-        if (!pData || len <= 0) {
-            DEBUG_ERROR("invalid params");
-            return -1;
+    void RpcClientImpl::handleConnect(const std::shared_ptr<TcpIoConnection>& connect) {
+        if (!connect) {
+            return;
         }
 
+        if (connect->isConnected()) {
+            DEBUG_INFO("io connect");
+        }
+        else {
+            DEBUG_INFO("io disconnect");
+        }
+    }
+
+    void RpcClientImpl::handleClose(const std::shared_ptr<TcpIoConnection>& connect) {
+        (void)connect;
+        if (m_ioConnection) {
+            DEBUG_INFO("io close");
+            m_ioConnection->destory();
+            m_ioConnection.reset();
+        }
+    }
+
+    void RpcClientImpl::handleData(const std::shared_ptr<TcpIoConnection>& connect, const std::string& data) {
+        (void)connect;
+
         if (m_msgCallback) {
-            m_msgCallback(std::string(pData, len));
-            return 0;
+            m_msgCallback(data);
         }
         else {
             DEBUG_ERROR("there is not msg handler");
         }
-
-        return 0;
-    }
-
-    void RpcClientImpl::setIoConnection(std::shared_ptr<IoMember> ioConnection) {
-        m_ioConnection = std::dynamic_pointer_cast<TcpIoConnection>(ioConnection);
-    }
-
-    int RpcClientImpl::startIoClient() {
-        // No implementation
-        return 0;
-    }
-
-    int RpcClientImpl::stopIoClient() {
-        // No implememtation
-        return 0;
     }
 }
 }

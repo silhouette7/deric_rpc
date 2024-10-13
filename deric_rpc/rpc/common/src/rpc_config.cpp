@@ -3,9 +3,7 @@
 #include "deric_debug.h"
 #include "rpc_config.h"
 
-namespace deric
-{
-namespace rpc
+namespace deric::rpc
 {
 int RpcConfig::init(const std::string& configFile) {
     std::ifstream inFile(configFile);
@@ -34,19 +32,20 @@ int RpcConfig::getValue(const std::string& key, std::string& val) const {
 }
 
 void RpcConfig::parseLine(const std::string& buf) {
-    size_t index = 0;
+    std::size_t index = 0;
 
     if (buf.empty() || buf[index]=='#') {
         return;
     }
 
-    size_t equalPos = buf.find('=');
+    std::size_t equalPos = buf.find('=');
     if (equalPos == std::string::npos) {
         DEBUG_ERROR("invalid buf: %s", buf.c_str());
+        return;
     }
 
-    for(index = equalPos - 1; index >= 0 && buf[index] == ' '; --index) {}
-    if (index == -1) {
+    for(index = equalPos - 1; index > 0 && buf[index] == ' '; --index) {}
+    if (index == 0 && buf[index] == ' ') {
         DEBUG_ERROR("key is empty");
         return;
     }
@@ -60,6 +59,5 @@ void RpcConfig::parseLine(const std::string& buf) {
     std::string value(buf, index, buf.length() - index);
 
     m_configItemMap.emplace(std::make_pair(std::move(key), std::move(value)));
-}
 }
 }

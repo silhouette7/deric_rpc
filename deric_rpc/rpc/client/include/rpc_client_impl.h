@@ -3,40 +3,38 @@
 
 #include "client_interface.h"
 #include "tcp_io_connection.h"
+
 #include <memory>
 
-namespace deric
+namespace deric::rpc
 {
-namespace rpc
-{
-class RpcClientImpl : public ClientInterface,
-                      public IoConnectionClientInterface,
-                      public std::enable_shared_from_this<RpcClientImpl>
+class RpcClientImpl : public ClientInterface
 {
 public:
-    int connect(const ClientConnectionConfig_s& _config) override;
+    RpcClientImpl() = default;
+
+    ~RpcClientImpl();
+
+    int connect(std::string_view ip, std::string_view port) override;
 
     int disconnect() override;
 
-    int sendMsg(const std::string& msg) override;
+    int sendMsg(std::string_view msg) override;
 
     int registerMessageCallback(const ClientMessageCallbackType& func) override;
 
-    int handleEvent(IoConnectionEvent_e event, void* data) override;
+    int registerMessageCallback(ClientMessageCallbackType&& func) override;
 
-    int handleData(const char *pData, int len) override;
+    void handleData(const std::shared_ptr<TcpIoConnection>& connect, const std::string& data);
 
-    void setIoConnection(std::shared_ptr<IoMember> ioConnection) override;
+    void handleConnect(const std::shared_ptr<TcpIoConnection>& connect);
 
-    int startIoClient() override;
-
-    int stopIoClient() override;
+    void handleClose(const std::shared_ptr<TcpIoConnection>& connect);
 
 private:
     std::shared_ptr<TcpIoConnection> m_ioConnection;
     ClientMessageCallbackType m_msgCallback;
 };
-}
 }
 
 #endif

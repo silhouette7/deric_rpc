@@ -1,47 +1,85 @@
 #ifndef _TCP_IO_CONNECTION_H_
 #define _TCP_IO_CONNECTION_H_
 
-#include "io_connection_client_interface.h"
 #include "io_interface.h"
-#include "component_public.h"
 
+#include <functional>
 #include <memory>
+#include <mutex>
+#include <string_view>
 #include <vector>
 
 namespace deric
 {
-namespace rpc
-{
-class TcpIoConnection : public IoMember
+class TcpIoConnection;
+
+using TcpIoConnectCallbackType = std::function<void(const std::shared_ptr<TcpIoConnection>&)>;
+
+using TcpIoCloseCallbackType = std::function<void(const std::shared_ptr<TcpIoConnection>&)>;
+
+using TcpIoDataCallbackType = std::function<void(const std::shared_ptr<TcpIoConnection>&, const std::string&)>;
+
+class TcpIoConnection : public IoMember,
+                        public std::enable_shared_from_this<TcpIoConnection>
 {
 public:
     TcpIoConnection();
+
+    TcpIoConnection(int socket);
 
     ~TcpIoConnection();
 
     int getFd() override;
 
-    int onReadAvailable() override;
+    void onReadAvailable() override;
 
-    int onWriteAvailable() override;
+    void onWriteAvailable() override;
 
-    int onControlAvailable() override;
+    void onControlAvailable() override;
 
-    int sendData(const char* data, int len) override;
+    void onIoError(IoMemberError_e) override;
 
-    IoMemberErrorAction onIoError(IoMemberError_e) override;
+    int sendData(std::string_view data) override;
 
-    void setIoClient(std::weak_ptr<IoConnectionClientInterface> client);
+    int connect();
 
-    void setIoFd(int socketFd);
-
-    int start();
-
-    int start(std::string Ip, int port);
+    int connect(std::string_view ip, int port);
     
-    int stop();
+    int shutdown();
+
+    int destory();
+
+    bool isConnected();
+
+    void setConnectCallback(const TcpIoConnectCallbackType& callback);
+
+    void setConnectCallback(TcpIoConnectCallbackType&& callback);
+
+    void unsetConnectCallback();
+
+    void setCloseCallback(const TcpIoCloseCallbackType& callback);
+
+    void setCloseCallback(TcpIoCloseCallbackType&& callback);
+
+    void unsetCloseCallback();
+
+    void setIoDataCallback(const TcpIoDataCallbackType& callback);
+
+    void setIoDataCallback(TcpIoDataCallbackType&& callback);
+
+    void unsetIoDataCallback();
 
 private:
+    constexpr static uint8_t TCP_HEADER_MAGIC = 0x01;
+    constexpr static size_t TCP_HEADER_OFFSET_MAGIC = 0;
+    constexpr static size_t TCP_HEADER_OFFSET_MESSIGE_LEN = 0;
+    constexpr static size_t TCP_HEADER_SIZE = 5;
+
+    enum class ConnectState {
+        DISCONNCTED,
+        CONNECTED
+    };
+
     typedef struct{
         uint8_t magic;
         uint32_t messageLen;
@@ -50,27 +88,40 @@ private:
         void serialerTo(char* buffer, int size);
     } TcpHeader_s;
 
-    static const uint8_t TCP_HEADER_MAGIC = 0x01;
+    void onConnected();
 
-    typedef enum{
-        TCP_HEADER_OFFSET_MAGIC = 0,
-        TCP_HEADER_OFFSET_MESSAGE_LEN = 1,
-        TCP_HEADER_SIZE = 5
-    } TcpHeaderOffset_e;
+    void onShutdown();
 
-    typedef enum {
-        TCP_IO_CONNECTION_MODE_SERVER = 0,
-        TCP_IO_CONNECTION_MODE_CLIENT
-    } TcpIoConnectionMode_e;
+    void onClosed();
 
-    ComponentState_e m_state;
-    std::vector<char> m_sendBuffer;
-    std::vector<char> m_receiveBuffer;
+    void onDestoryed();
+
+    void handleClose();
+
+    inline static uint32_t GET_UINT32_FROM_CHARS(const uint8_t* data) {
+        return static_cast<uint32_t>(data[0] << 24)
+                | static_cast<uint32_t>(data[1] << 16)
+                | static_cast<uint32_t>(data[2] << 8)
+                | static_cast<uint32_t>(data[3]);
+    }
+
+    inline static void SET_UINT32_TO_CHARS(uint32_t num, uint8_t* data) {
+        data[0] = static_cast<uint8_t>(num >> 24);
+        data[1] = static_cast<uint8_t>(num >> 16);
+        data[2] = static_cast<uint8_t>(num >> 8);
+        data[3] = static_cast<uint8_t>(num);
+    }
+
+    ConnectState m_connectState;
     int m_socketFd;
-    TcpIoConnectionMode_e m_ioMode;
-    std::weak_ptr<IoConnectionClientInterface> m_ioClient;
+    std::mutex m_mutex;
+    std::string m_sendBuffer;
+    std::string m_receiveBuffer;
+    TcpIoConnectCallbackType m_connectCallback;
+    TcpIoCloseCallbackType m_closeCallback;
+    TcpIoDataCallbackType m_dataCallback;
+    void* m_context;
 };
-}
 }
 
 #endif
