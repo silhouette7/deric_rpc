@@ -11,7 +11,7 @@ auto make_copyable_function(F&& f) {
     using function_type = std::decay_t<F>;
 
     std::shared_ptr<function_type> spFunc = std::make_shared<function_type>(std::forward<F>(f));
-    return [spFunc](auto&&... args){return (*spFunc)(std::forward<decltype(args)>(args)...);};
+    return [spFunc = std::move(spFunc)](auto&&... args){return (*spFunc)(std::forward<decltype(args)>(args)...);};
 }
 }
 #endif

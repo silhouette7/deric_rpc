@@ -21,6 +21,8 @@ int main() {
 
     auto resHelloWorld = clientEntry->invoke<void>(RPC_SERVICE_DERIC_TEST_HELLO_WORLD);
     auto resHello = clientEntry->invoke<void>(RPC_SERVICE_DERIC_TEST_HELLO, "what's up");
+    auto resCount = clientEntry->invoke<int>(RPC_SERVICE_DERIC_TEST_COUNT);
+    auto resCalInit = clientEntry->invoke<void>(RPC_SERVICE_DERIC_TEST_CACULATOR_INIT);
     auto resAdd = clientEntry->invoke<int>(RPC_SERVICE_DERIC_TEST_ADD, 1, 2); 
     int a = 3, b = 1;
     auto resMinor = clientEntry->invoke<int>(RPC_SERVICE_DERIC_TEST_MINOR, a, b);
@@ -28,12 +30,14 @@ int main() {
     try {
         resHello.get();
         resHelloWorld.get();
+        resCalInit.get();
     }
     catch(...) {
         std::cout << "invoke hello function failed" << std::endl;
     }
 
     try {
+        std::cout << RPC_SERVICE_DERIC_TEST_COUNT << " res: " << resCount.get() << std::endl;
         std::cout << RPC_SERVICE_DERIC_TEST_ADD << " res: " << resAdd.get() << std::endl;
         std::cout << RPC_SERVICE_DERIC_TEST_MINOR << " res: " << resMinor.get() << std::endl;
     }

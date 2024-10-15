@@ -31,9 +31,7 @@ std::optional<std::string> exec(F&& func, std::string_view data) {
     }
     else {
         auto funcRes = std::apply(std::forward<F>(func), std::move(args));
-        std::string res;
-        serialer::serialMessageData(std::move(funcRes), res);
-        return res;
+        return serialer::serialMessageData(std::move(funcRes));
     }
 }
 

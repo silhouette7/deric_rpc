@@ -7,6 +7,12 @@
 //hello function
 #define RPC_SERVICE_DERIC_TEST_HELLO "rpc.service.deric.test.hello"
 
+//count function
+#define RPC_SERVICE_DERIC_TEST_COUNT "rpc.service.deric.test.count"
+
+//caculator init function
+#define RPC_SERVICE_DERIC_TEST_CACULATOR_INIT "rpc.service.deric.test.caculator.init"
+
 //add function
 #define RPC_SERVICE_DERIC_TEST_ADD "rpc.service.deric.test.add"
 
