@@ -56,6 +56,8 @@ namespace deric::rpc
             return -1;
         }
 
+        m_ioConnection->unsetIoDataCallback();
+        m_ioConnection->unsetConnectCallback();
         if (m_ioConnection->isConnected()) {
             if (0 > m_ioConnection->shutdown()) {
                 DEBUG_ERROR("unable to shutdown the io connection");
